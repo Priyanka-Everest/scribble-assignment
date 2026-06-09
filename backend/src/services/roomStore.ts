@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Participant, Room, RoomSnapshot } from "../models/game.js";
+import type { Guess, Participant, Room, RoomSnapshot } from "../models/game.js";
 import { STARTER_ROLES, STARTER_WORDS } from "../seed/starterData.js";
 
 const rooms = new Map<string, Room>();
@@ -58,6 +58,8 @@ export function createRoom(playerName?: string) {
     hostId: participant.id,
     drawerId: null,
     secretWord: null,
+    guesses: [],
+    scores: {},
     participants: [participant],
     createdAt: now(),
     updatedAt: now()
@@ -115,6 +117,52 @@ export function startGame(code: string, participantId: string): StartGameResult 
   room.status = "playing";
   room.drawerId = room.participants[0].id;
   room.secretWord = STARTER_WORDS[0];
+  room.scores = Object.fromEntries(room.participants.map((p) => [p.id, 0]));
+  room.guesses = [];
+  room.updatedAt = now();
+  rooms.set(room.code, room);
+
+  return { room: cloneRoom(room) };
+}
+
+type SubmitGuessError = { error: number; message: string };
+type SubmitGuessSuccess = { room: Room };
+type SubmitGuessResult = SubmitGuessError | SubmitGuessSuccess;
+
+export function submitGuess(code: string, participantId: string, guess: string): SubmitGuessResult {
+  const room = rooms.get(code);
+
+  if (!room) {
+    return { error: 404, message: "Room not found" };
+  }
+
+  if (room.status !== "playing") {
+    return { error: 400, message: "Room is not in playing status" };
+  }
+
+  if (participantId === room.drawerId) {
+    return { error: 403, message: "The drawer cannot submit guesses" };
+  }
+
+  const participant = room.participants.find((p) => p.id === participantId);
+  if (!participant) {
+    return { error: 400, message: "Participant not found in this room" };
+  }
+
+  const trimmed = guess.trim();
+  const correct = trimmed.toLowerCase() === room.secretWord!.toLowerCase();
+
+  room.scores[participantId] = (room.scores[participantId] ?? 0) + (correct ? 100 : 0);
+
+  const guessRecord: Guess = {
+    participantId,
+    participantName: participant.name,
+    word: trimmed,
+    correct,
+    submittedAt: now()
+  };
+
+  room.guesses.push(guessRecord);
   room.updatedAt = now();
   rooms.set(room.code, room);
 
@@ -142,6 +190,8 @@ export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSn
     hostId: room.hostId,
     drawerId: room.drawerId,
     secretWord: isDrawer ? room.secretWord : null,
+    guesses: room.guesses.map((g) => ({ ...g })),
+    scores: { ...room.scores },
     participants: room.participants.map((participant) => ({ ...participant })),
     availableWords: isPlaying ? [] : listWords(),
     roles: [...STARTER_ROLES]
