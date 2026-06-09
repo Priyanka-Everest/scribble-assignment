@@ -125,6 +125,62 @@ export function startGame(code: string, participantId: string): StartGameResult 
   return { room: cloneRoom(room) };
 }
 
+type EndGameError = { error: number; message: string };
+type EndGameSuccess = { room: Room };
+type EndGameResult = EndGameError | EndGameSuccess;
+
+export function endGame(code: string, participantId: string): EndGameResult {
+  const room = rooms.get(code);
+
+  if (!room) {
+    return { error: 404, message: "Room not found" };
+  }
+
+  if (room.status !== "playing") {
+    return { error: 400, message: "Room is not in playing status" };
+  }
+
+  if (room.hostId !== participantId) {
+    return { error: 403, message: "Only the host can end the round" };
+  }
+
+  room.status = "result";
+  room.updatedAt = now();
+  rooms.set(room.code, room);
+
+  return { room: cloneRoom(room) };
+}
+
+type RestartGameError = { error: number; message: string };
+type RestartGameSuccess = { room: Room };
+type RestartGameResult = RestartGameError | RestartGameSuccess;
+
+export function restartGame(code: string, participantId: string): RestartGameResult {
+  const room = rooms.get(code);
+
+  if (!room) {
+    return { error: 404, message: "Room not found" };
+  }
+
+  if (room.status !== "result") {
+    return { error: 400, message: "Room is not in result status" };
+  }
+
+  if (room.hostId !== participantId) {
+    return { error: 403, message: "Only the host can restart the game" };
+  }
+
+  room.status = "lobby";
+  room.drawerId = null;
+  room.secretWord = null;
+  room.guesses = [];
+  room.scores = {};
+  room.updatedAt = now();
+  rooms.set(room.code, room);
+
+  return { room: cloneRoom(room) };
+}
+
 type SubmitGuessError = { error: number; message: string };
 type SubmitGuessSuccess = { room: Room };
 type SubmitGuessResult = SubmitGuessError | SubmitGuessSuccess;
@@ -182,6 +238,7 @@ export function saveRoom(room: Room) {
 
 export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSnapshot {
   const isPlaying = room.status === "playing";
+  const isResult = room.status === "result";
   const isDrawer = isPlaying && viewerParticipantId === room.drawerId;
 
   return {
@@ -189,11 +246,11 @@ export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSn
     status: room.status,
     hostId: room.hostId,
     drawerId: room.drawerId,
-    secretWord: isDrawer ? room.secretWord : null,
+    secretWord: isDrawer || isResult ? room.secretWord : null,
     guesses: room.guesses.map((g) => ({ ...g })),
     scores: { ...room.scores },
     participants: room.participants.map((participant) => ({ ...participant })),
-    availableWords: isPlaying ? [] : listWords(),
+    availableWords: isPlaying || isResult ? [] : listWords(),
     roles: [...STARTER_ROLES]
   };
 }

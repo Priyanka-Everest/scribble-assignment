@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "../components/Card";
 import { GuessForm } from "../components/GuessForm";
-import { ResultPanel } from "../components/ResultPanel";
 import { RoomCodeBadge } from "../components/RoomCodeBadge";
 import { Scoreboard } from "../components/Scoreboard";
 import { api, type RoomSnapshot } from "../services/api";
@@ -16,6 +15,8 @@ export function GamePage() {
   const navigate = useNavigate();
   const { room: contextRoom, participantId } = useRoomState();
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(contextRoom);
+  const [endRoundError, setEndRoundError] = useState<string | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   // Canvas refs and drawing state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -47,7 +48,15 @@ export function GamePage() {
     const intervalId = setInterval(() => {
       api
         .fetchRoom(code, pid)
-        .then((response) => setSnapshot(response.room))
+        .then((response) => {
+          const room = response.room;
+          setSnapshot(room);
+          // Navigate to lobby after restart
+          if (room.status === "lobby") {
+            clearInterval(intervalId);
+            navigate("/lobby");
+          }
+        })
         .catch((err: { status?: number }) => {
           if (err.status === 404) {
             clearInterval(intervalId);
@@ -63,7 +72,9 @@ export function GamePage() {
     return null;
   }
 
+  const isHost = participantId === snapshot.hostId;
   const isDrawer = participantId !== null && participantId === snapshot.drawerId;
+  const isResult = snapshot.status === "result";
   const viewer = snapshot.participants.find((p) => p.id === participantId) ?? null;
 
   // Canvas event helpers
@@ -108,6 +119,105 @@ export function GamePage() {
     }
   }
 
+  async function handleEndRound() {
+    if (!participantId || !snapshot) return;
+    try {
+      setEndRoundError(null);
+      const response = await api.endGame(snapshot.code, participantId);
+      setSnapshot(response.room);
+    } catch (err) {
+      setEndRoundError(err instanceof Error ? err.message : "Unable to end round");
+    }
+  }
+
+  async function handleRestart() {
+    if (!participantId || !snapshot) return;
+    try {
+      setRestartError(null);
+      await api.restartGame(snapshot.code, participantId);
+      navigate("/lobby");
+    } catch (err) {
+      setRestartError(err instanceof Error ? err.message : "Unable to restart");
+    }
+  }
+
+  // ── Result view ──────────────────────────────────────────────────────────
+  if (isResult) {
+    return (
+      <section className="panel game-page">
+        <div className="game-page__header">
+          <div className="game-page__header-left">
+            <span className="section-kicker">Round Over</span>
+            <h1 className="game-page__title">Results</h1>
+          </div>
+          <RoomCodeBadge code={snapshot.code} />
+        </div>
+
+        <div className="game-page__layout">
+          <aside className="game-page__sidebar game-page__sidebar--left">
+            <Scoreboard participants={snapshot.participants} scores={snapshot.scores} />
+          </aside>
+
+          <div className="game-page__main">
+            <Card title="The Word Was">
+              <p style={{ fontSize: "2rem", fontWeight: "bold", textAlign: "center", padding: "16px" }}>
+                {snapshot.secretWord ?? "—"}
+              </p>
+            </Card>
+
+            <Card title="Guess History">
+              {snapshot.guesses.length === 0 ? (
+                <p>No guesses were submitted.</p>
+              ) : (
+                <ul className="player-list">
+                  {snapshot.guesses.map((g, i) => (
+                    <li key={i}>
+                      <span>
+                        <strong>{g.participantName}</strong>: {g.word}
+                      </span>
+                      <span className="player-list__meta">
+                        {g.correct ? "Correct ✓" : "Incorrect ✗"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+
+          <aside className="game-page__sidebar game-page__sidebar--right">
+            <Card title="Players">
+              <ul className="player-list">
+                {snapshot.participants.map((p) => (
+                  <li key={p.id}>
+                    <span>{p.name}</span>
+                    <span className="player-list__meta">
+                      {scores_label(p.id, snapshot.scores)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </aside>
+        </div>
+
+        {restartError ? <p className="form__error" style={{ margin: "8px 0" }}>{restartError}</p> : null}
+
+        <div className="button-row">
+          <button
+            className="button button--primary"
+            disabled={!isHost}
+            title={isHost ? undefined : "Only the host can restart"}
+            onClick={handleRestart}
+          >
+            {isHost ? "Restart" : "Only the host can restart"}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  // ── Playing view ─────────────────────────────────────────────────────────
   return (
     <section className="panel game-page">
       <div className="game-page__header">
@@ -135,7 +245,6 @@ export function GamePage() {
             </ul>
           </Card>
           <Scoreboard participants={snapshot.participants} scores={snapshot.scores} />
-          <ResultPanel />
         </aside>
 
         <div className="game-page__main">
@@ -209,11 +318,26 @@ export function GamePage() {
         </aside>
       </div>
 
+      {endRoundError ? <p className="form__error" style={{ margin: "8px 0" }}>{endRoundError}</p> : null}
+
       <div className="button-row">
+        <button
+          className="button button--primary"
+          disabled={!isHost}
+          title={isHost ? undefined : "Only the host can end the round"}
+          onClick={handleEndRound}
+        >
+          {isHost ? "End Round" : "Only the host can end the round"}
+        </button>
         <button className="button button--secondary" onClick={() => navigate("/lobby")}>
           Exit Game
         </button>
       </div>
     </section>
   );
+}
+
+function scores_label(participantId: string, scores: Record<string, number>) {
+  const score = scores[participantId] ?? 0;
+  return `${score} pts`;
 }
