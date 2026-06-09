@@ -1,47 +1,77 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card } from "../components/Card";
 import { GuessForm } from "../components/GuessForm";
 import { ResultPanel } from "../components/ResultPanel";
 import { RoomCodeBadge } from "../components/RoomCodeBadge";
 import { Scoreboard } from "../components/Scoreboard";
+import { api, type RoomSnapshot } from "../services/api";
 import { useRoomState } from "../state/roomStore";
 
 export function GamePage() {
   const navigate = useNavigate();
-  const { room, participantId } = useRoomState();
+  const { room: contextRoom, participantId } = useRoomState();
+  const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(contextRoom);
 
   useEffect(() => {
-    if (!room) {
+    if (!contextRoom) {
       navigate("/", { replace: true });
+      return;
     }
-  }, [navigate, room]);
 
-  if (!room) {
+    api
+      .fetchRoom(contextRoom.code, participantId ?? undefined)
+      .then((response) => setSnapshot(response.room))
+      .catch((err: { status?: number }) => {
+        if (err.status === 404) {
+          navigate("/", { replace: true, state: { error: "Room not found" } });
+        }
+      });
+  }, [contextRoom, navigate, participantId]);
+
+  if (!snapshot) {
     return null;
   }
 
-  const viewer = room.participants.find((participant) => participant.id === participantId) ?? null;
+  const isDrawer = participantId !== null && participantId === snapshot.drawerId;
+  const viewer = snapshot.participants.find((p) => p.id === participantId) ?? null;
 
   return (
     <section className="panel game-page">
       <div className="game-page__header">
         <div className="game-page__header-left">
           <span className="section-kicker">Round 1</span>
-          <h1 className="game-page__title">Guess the Word!</h1>
+          <h1 className="game-page__title">
+            {isDrawer ? "You are drawing!" : "Guess the Word!"}
+          </h1>
         </div>
-        <RoomCodeBadge code={room.code} />
+        <RoomCodeBadge code={snapshot.code} />
       </div>
 
       <div className="game-page__layout">
         <aside className="game-page__sidebar game-page__sidebar--left">
+          <Card title="Players">
+            <ul className="player-list">
+              {snapshot.participants.map((p) => (
+                <li key={p.id}>
+                  <span>{p.name}</span>
+                  <span className="player-list__meta">
+                    {p.id === snapshot.drawerId ? "Drawer" : "Guesser"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
           <Scoreboard />
           <ResultPanel />
         </aside>
 
         <div className="game-page__main">
           <Card title="Canvas">
-            <div className="canvas-placeholder" style={{ minHeight: '500px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+            <div
+              className="canvas-placeholder"
+              style={{ minHeight: "500px", backgroundColor: "#ffffff", border: "1px solid #e5e7eb" }}
+            >
               Waiting for drawer...
             </div>
           </Card>
@@ -55,8 +85,12 @@ export function GamePage() {
                 <dd>{viewer?.name ?? "Unknown player"}</dd>
               </div>
               <div>
-                <dt>Status</dt>
-                <dd>Playing</dd>
+                <dt>Role</dt>
+                <dd>{isDrawer ? "Drawer" : "Guesser"}</dd>
+              </div>
+              <div>
+                <dt>Word</dt>
+                <dd>{isDrawer && snapshot.secretWord ? snapshot.secretWord : "Guess the word!"}</dd>
               </div>
             </dl>
           </Card>

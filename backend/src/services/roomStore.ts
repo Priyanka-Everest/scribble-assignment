@@ -30,7 +30,8 @@ function generateUniqueCode() {
 }
 
 function displayName(name?: string) {
-  return name || "Player";
+  const trimmed = name?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "Player";
 }
 
 function createParticipant(name?: string): Participant {
@@ -54,6 +55,9 @@ export function createRoom(playerName?: string) {
   const room: Room = {
     code: generateUniqueCode(),
     status: "lobby",
+    hostId: participant.id,
+    drawerId: null,
+    secretWord: null,
     participants: [participant],
     createdAt: now(),
     updatedAt: now()
@@ -85,6 +89,38 @@ export function joinRoom(code: string, playerName?: string) {
   };
 }
 
+type StartGameError = { error: number; message: string };
+type StartGameSuccess = { room: Room };
+type StartGameResult = StartGameError | StartGameSuccess;
+
+export function startGame(code: string, participantId: string): StartGameResult {
+  const room = rooms.get(code);
+
+  if (!room) {
+    return { error: 404, message: "Room not found" };
+  }
+
+  if (room.status !== "lobby") {
+    return { error: 400, message: "Room is not in lobby status" };
+  }
+
+  if (room.hostId !== participantId) {
+    return { error: 403, message: "Only the host can start the game" };
+  }
+
+  if (room.participants.length < 2) {
+    return { error: 400, message: "At least 2 players are required to start" };
+  }
+
+  room.status = "playing";
+  room.drawerId = room.participants[0].id;
+  room.secretWord = STARTER_WORDS[0];
+  room.updatedAt = now();
+  rooms.set(room.code, room);
+
+  return { room: cloneRoom(room) };
+}
+
 export function getRoom(code: string) {
   const room = rooms.get(code);
   return room ? cloneRoom(room) : null;
@@ -97,13 +133,17 @@ export function saveRoom(room: Room) {
 }
 
 export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSnapshot {
-  void viewerParticipantId;
+  const isPlaying = room.status === "playing";
+  const isDrawer = isPlaying && viewerParticipantId === room.drawerId;
 
   return {
     code: room.code,
     status: room.status,
+    hostId: room.hostId,
+    drawerId: room.drawerId,
+    secretWord: isDrawer ? room.secretWord : null,
     participants: room.participants.map((participant) => ({ ...participant })),
-    availableWords: listWords(),
+    availableWords: isPlaying ? [] : listWords(),
     roles: [...STARTER_ROLES]
   };
 }

@@ -1,4 +1,5 @@
 export type ParticipantRole = "drawer" | "guesser";
+export type RoomStatus = "lobby" | "playing" | "result";
 
 export interface Participant {
   id: string;
@@ -8,7 +9,10 @@ export interface Participant {
 
 export interface RoomSnapshot {
   code: string;
-  status: "lobby";
+  status: RoomStatus;
+  hostId: string;
+  drawerId: string | null;
+  secretWord: string | null;
   participants: Participant[];
   availableWords: string[];
   roles: ParticipantRole[];
@@ -35,7 +39,9 @@ async function request<T>(path: string, init?: RequestInit) {
       message?: string;
     };
 
-    throw new Error(errorBody.message ?? "Request failed");
+    throw Object.assign(new Error(errorBody.message ?? "Request failed"), {
+      status: response.status
+    });
   }
 
   return (await response.json()) as T;
@@ -57,5 +63,11 @@ export const api = {
   fetchRoom(code: string, participantId?: string) {
     const query = participantId ? `?participantId=${encodeURIComponent(participantId)}` : "";
     return request<{ room: RoomSnapshot }>(`/rooms/${encodeURIComponent(code)}${query}`);
+  },
+  startGame(code: string, participantId: string) {
+    return request<{ room: RoomSnapshot }>(`/rooms/${encodeURIComponent(code)}/start`, {
+      method: "POST",
+      body: JSON.stringify({ participantId })
+    });
   }
 };

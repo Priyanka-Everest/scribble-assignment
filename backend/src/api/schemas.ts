@@ -1,11 +1,15 @@
 import { z } from "zod";
 
 export const createRoomSchema = z.object({
-  playerName: z.string().optional()
+  playerName: z.string().trim().min(1, "Player name must not be empty").optional()
 });
 
 export const joinRoomSchema = z.object({
-  playerName: z.string().optional()
+  playerName: z.string().trim().min(1, "Player name must not be empty").optional()
+});
+
+export const startGameSchema = z.object({
+  participantId: z.string().uuid("participantId must be a valid UUID")
 });
 
 export const roomCodeParamsSchema = z.object({
